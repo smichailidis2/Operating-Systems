@@ -47,6 +47,7 @@ int sys_Pipe(pipe_t* pipe)
 	p_PIPE_CB->has_data = COND_INIT;
 	p_PIPE_CB->w_pos = 0;
 	p_PIPE_CB->r_pos = 0;
+	p_PIPE_CB->available_buffer_space = PIPE_BUFFER_SIZE;
 
 	fcbs[0]->streamobj = p_PIPE_CB;
 	fcbs[1]->streamobj = p_PIPE_CB;
@@ -62,12 +63,83 @@ int sys_Pipe(pipe_t* pipe)
 
 int pipe_write(void* pipecb_t, const char *buf, unsigned int n)
 {
-	return -1;
+	pipe_cb* p_pipe= (pipe_cb*)pipecb_t;
+
+
+	// check if pipe or the in/out streamfunctions are NULL
+	if (p_pipe == NULL || p_pipe->reader == NULL || p_pipe->writer == NULL) {
+		return -1;
+	}
+
+	uint available_bytes = p_pipe->available_buffer_space;
+	
+
+	/*------- ENTER IN CRITICAL SECTION -------*/
+	while(available_bytes == 0 ) {
+		// while there is no room to write , we must signal the reader , and then wait for it to read some data.
+		kernel_wait(&p_pipe->has_space, SCHED_PIPE);
+
+		// When writer resurrects, the w_pos and r_pos will have changed, so available bytes needs to be re-evaluated
+		available_bytes = p_pipe->available_buffer_space;
+	}
+
+
+
+	//if the available bytes are less than the length of buffer to be copied, only the available bytes will be filled.
+	uint k = (n > available_bytes )? available_bytes : n ;
+
+	/*=== PERFORM WRITE OPERATION ===*/
+	for (int i=0; i < k; i++) {
+		p_pipe->BUFFER[p_pipe->w_pos++] = buf[i];
+		p_pipe->w_pos %= PIPE_BUFFER_SIZE; //cyclic buffer : new w_pos is (w_pos+1)mod(PIPE_BUFFER_SIZE).
+		p_pipe->available_buffer_space--;
+	}
+
+	// Resurrect all readers
+	kernel_broadcast(&p_pipe->has_data);
+
+	return k;
 }
+
+
+
 
 int pipe_read(void* pipecb_t, char *buf, unsigned int n)
 {
-	return -1;
+	pipe_cb* p_pipe= (pipe_cb*)pipecb_t;
+
+
+	// check if pipe or the in/out streamfunctions are NULL
+	if (p_pipe == NULL || p_pipe->reader == NULL) {
+		return -1;
+	}
+
+	uint available_bytes = p_pipe->available_buffer_space;
+
+	/*------- ENTER IN CRITICAL SECTION -------*/
+	while(available_bytes == PIPE_BUFFER_SIZE ) {
+		// while there are no data written , we must wait until writer writes some data.
+		kernel_wait(&p_pipe->has_data, SCHED_PIPE);
+
+		// When reader resurrects, the w_pos and r_pos will have changed, so available bytes needs to be re-evaluated
+		available_bytes = p_pipe->available_buffer_space;
+	}
+
+	uint bytes_to_read = PIPE_BUFFER_SIZE - available_bytes;
+
+	// if size of buffer n is less than bytes to be read, read only n chars.
+	uint k = (n < bytes_to_read) ? (n) : (bytes_to_read) ;
+
+	for (int i=0; i < k; i++) {
+		buf[i] = p_pipe->BUFFER[p_pipe->r_pos++];
+		p_pipe->r_pos %= PIPE_BUFFER_SIZE; //cyclic buffer : new r_pos is (r_pos+1)mod(PIPE_BUFFER_SIZE).
+		p_pipe->available_buffer_space++;
+	}
+
+	// signal the writer that some data have been read
+	kernel_broadcast(&p_pipe->has_space);
+
+	return k;
 }
 
 int pipe_writer_close(void* _pipecb)

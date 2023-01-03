@@ -110,6 +110,8 @@ typedef struct pipe_control_block {
 
   int w_pos, r_pos;   // Reader , writer positions in buffer
 
+  uint available_buffer_space;
+
   char BUFFER[PIPE_BUFFER_SIZE];
 
 } pipe_cb;
