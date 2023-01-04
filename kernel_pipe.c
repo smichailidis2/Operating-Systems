@@ -116,6 +116,10 @@ int pipe_read(void* pipecb_t, char *buf, unsigned int n)
 
 	uint available_bytes = p_pipe->available_buffer_space;
 
+	// tif there is no writer and pipe buffer is empty, bytes read = 0.
+	if (p_pipe->writer == NULL && available_bytes == PIPE_BUFFER_SIZE)
+		return 0;
+
 	/*------- ENTER IN CRITICAL SECTION -------*/
 	while(available_bytes == PIPE_BUFFER_SIZE ) {
 		// while there are no data written , we must wait until writer writes some data.
@@ -130,29 +134,75 @@ int pipe_read(void* pipecb_t, char *buf, unsigned int n)
 	// if size of buffer n is less than bytes to be read, read only n chars.
 	uint k = (n < bytes_to_read) ? (n) : (bytes_to_read) ;
 
+	/*=== PERFORM READ OPERATION ===*/
 	for (int i=0; i < k; i++) {
 		buf[i] = p_pipe->BUFFER[p_pipe->r_pos++];
 		p_pipe->r_pos %= PIPE_BUFFER_SIZE; //cyclic buffer : new r_pos is (r_pos+1)mod(PIPE_BUFFER_SIZE).
 		p_pipe->available_buffer_space++;
 	}
 
-	// signal the writer that some data have been read
+	// resurrect all readers
 	kernel_broadcast(&p_pipe->has_space);
 
 	return k;
 }
 
+
+
+
+
 int pipe_writer_close(void* _pipecb)
 {
-	return -1;
+	pipe_cb* p_pipe = (pipe_cb*) _pipecb;
+
+	if (p_pipe == NULL)
+		return -1;
+
+	p_pipe->writer = NULL;
+
+	// if there is no reader fcb we free all the pipe I/O and the pipe itself.
+	if (p_pipe->reader == NULL) {
+		free(p_pipe->writer);
+		free(p_pipe->reader);
+		free(p_pipe);
+	}
+
+
+	return 0;
 }
+
+
+
+
 
 int pipe_reader_close(void* _pipecb)
 {
-	return -1;
+
+	pipe_cb* p_pipe = (pipe_cb*)_pipecb;
+
+	if (p_pipe == NULL)
+		return -1;
+
+	p_pipe->reader = NULL;
+
+	uint bytes_to_read = PIPE_BUFFER_SIZE - p_pipe->available_buffer_space;
+
+	// if there are no available data to read and there is no writer , free all
+	if (bytes_to_read == 0 && p_pipe->writer == NULL) {
+		free(p_pipe->reader);
+		free(p_pipe->writer);
+		free(p_pipe);
+	}
+
+
+	return 0;
 }
 
-//returns -1 
+
+
+
+
+//returns -1 always
 int pipe_error(void* pipecb_t, const char *buf, unsigned int n) 
 {
 	return -1;
