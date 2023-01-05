@@ -187,6 +187,78 @@ int device_open(Device_type major, uint minor, void** obj, file_ops** ops);
   */
 uint device_no(Device_type major);
 
+/* ------- SOCKETS ------------ */
+
+typedef struct socket_control_block SCB;
+
+typedef enum socket_type{
+  SOCKET_LISTENER,
+  SOCKET_UNBOUND,
+  SOCKET_PEER
+} socket_type;
+  
+int socket_read(void* read, char* buf, uint size);
+int socket_write(void* write, const char* buf, uint size);
+int socket_close(void* fid);
+
+
+typedef struct peer_socket {
+
+  SCB* peer;
+  pipe_cb* write;
+  pipe_cb* read;
+
+} S_PEER;
+
+
+
+typedef struct listener_socket {
+
+  rlnode queue;
+  CondVar req_available;
+
+} S_LISTENER;
+
+
+
+typedef struct unbound_socket {
+
+  rlnode unbound_socket;
+
+} S_UNBOUND;
+
+
+
+typedef struct socket_control_block {
+
+  uint refcount;
+
+  FCB* fcb;
+  socket_type type;
+  port_t port;
+
+  union {
+    S_LISTENER s_listener;
+    S_UNBOUND s_unbound;
+    S_PEER s_peer;
+  };
+
+} SCB;
+
+
+
+
+typedef struct connection_request {
+
+  int admitted;
+  SCB* peer;
+
+  CondVar connected_cv;
+  rlnode queue_node;
+
+} CONNECTION_REQUEST;
+
+
 /** @} */
 
 #endif
