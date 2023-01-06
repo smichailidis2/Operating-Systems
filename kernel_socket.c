@@ -21,7 +21,6 @@ Fid_t sys_Socket(port_t port)
 	if(port == NOPORT)
 		return 0;
 
-
 	// if input port is invalid, reurn NOFILE
 	if (port < 0 || port > MAX_PORT)
 		return NOFILE;
@@ -29,7 +28,7 @@ Fid_t sys_Socket(port_t port)
 	FCB* fcb;
 	Fid_t fid;
 	int k = FCB_reserve(1,&fid,&fcb);
-	// if FCB_reserve returns 0 ,there is no FCB reservation hence the return value NOFILE.
+	// if FCB_reserve returns 0 ,there is no FCB reservation.
 	if(k == 0)
 		return NOFILE;
 
@@ -58,6 +57,9 @@ Fid_t sys_Socket(port_t port)
 	return fid;
 }
 
+
+
+
 int sys_Listen(Fid_t sock)
 {	
 	// invalid file ID
@@ -83,13 +85,13 @@ int sys_Listen(Fid_t sock)
 	if(p_scb->type != SOCKET_UNBOUND)	// socket already a listener
 		return -1;
 
-	// bind socket to port
-	PORTMAP[p_scb->port] = p_scb;
-
 	// adjust socket fields and union
 	p_scb->type = SOCKET_LISTENER;
 	p_scb->s_listener.req_available = COND_INIT;
 	rlnode_init(&(p_scb->s_listener.queue),NULL);
+
+	// bind socket to port
+	PORTMAP[p_scb->port] = p_scb;
 
 	return 0;
 }
@@ -116,7 +118,7 @@ Fid_t sys_Accept(Fid_t lsock)
 	// do all checks as necessary
 	if (p_scb == NULL)
 		return NOFILE;
-	if (p_scb->port <= NOFILE || p_scb->port > MAX_PORT)
+	if (p_scb->port <= NOPORT || p_scb->port > MAX_PORT)
 		return NOFILE;
 	if (p_scb->type != SOCKET_LISTENER)
 		return NOFILE;
@@ -161,22 +163,159 @@ Fid_t sys_Accept(Fid_t lsock)
 	if(peer2 == NULL)
 		return NOFILE;
 
+	peer2->type = SOCKET_PEER;
 
 
+	// connect 2 sockets
+	peer1->s_peer.peer = peer2;
+	peer2->s_peer.peer = peer1;
 
-	return NOFILE;
+	/* PIPE CREATION */
+	FCB* t_fs1;
+	FCB* t_fs2;
+
+	// get file control blocks of peers
+	t_fs1 = peer1->fcb;
+	t_fs2 = peer2->fcb;
+
+	// create pipes
+	pipe_cb* pipe1 = (pipe_cb*)xmalloc(sizeof(pipe_cb));
+	pipe_cb* pipe2 = (pipe_cb*)xmalloc(sizeof(pipe_cb));
+
+	// --- INIT PIPE CBs ---
+	// PIPE 1)
+	pipe1->reader = t_fs1;
+	pipe1->writer = t_fs2;
+
+	pipe1->has_space = COND_INIT;
+	pipe1->has_data = COND_INIT;
+	pipe1->w_pos = 0;
+	pipe1->r_pos = 0;
+
+	// PIPE 2)
+	pipe2->reader = t_fs2;
+	pipe2->writer = t_fs1;
+
+	pipe2->has_space = COND_INIT;
+	pipe2->has_data = COND_INIT;
+	pipe2->w_pos = 0;
+	pipe2->r_pos = 0;
+	// -----------------------
+
+	kernel_signal(&request->connected_cv);
+	p_scb->refcount--;
+
+	if (p_scb->refcount == 0)
+		free(p_scb);
+
+	return desc;
 }
 
 
 int sys_Connect(Fid_t sock, port_t port, timeout_t timeout)
-{
-	return -1;
+{	
+	// check illegal file id
+	if (sock<0 || sock>MAX_FILEID)
+		return -1;
+
+	FCB* f = get_fcb(sock);
+
+	SCB* p_socket = f->streamobj;
+
+	// Check the following:
+	//1. If file stream is NULL
+	//2. If stream object is NULL
+	//3. If socket to be connected is already a peer or a listener
+	if (f == NULL || p_socket == NULL || p_socket->type != SOCKET_UNBOUND) 
+		return -1;
+	if (port <= 0 || port > MAX_PORT)
+		return -1;
+	if (PORTMAP[port] == NULL) // || PORTMAP[port]->type != SOCKET_LISTENER
+		return -1;
+
+	/* Establish the connection */
+	CONNECTION_REQUEST* request = (CONNECTION_REQUEST*)xmalloc(sizeof(CONNECTION_REQUEST));
+	SCB* listener = PORTMAP[port];
+
+	//init request
+	request->admitted = 0;
+	request->peer = p_socket;
+	request->connected_cv = COND_INIT;
+	rlnode_init(&request->queue_node, request);
+
+	// add request to the listener's request queue
+	rlist_push_back(&listener->s_listener.queue, &request->queue_node);
+
+	// signal the listener
+	kernel_signal(&listener->s_listener.req_available);
+
+	listener->refcount++;
+	
+	while (!request->admitted) {
+		int retval = kernel_timedwait(&request->connected_cv, SCHED_IO, timeout);
+		
+		// request timed out
+		if(!retval)
+			return -1;
+	}
+
+	p_socket->refcount--;
+	if(!p_socket->refcount)
+		free(p_socket);
+
+	if (!request->admitted)
+		return -1;
+
+	return 0;
 }
 
 
 int sys_ShutDown(Fid_t sock, shutdown_mode how)
 {
-	return -1;
+	// illegal shutdown_mode arg value
+	if (how < 1 || how > 3)
+		return -1;
+
+	// illegal file id
+	if (sock < 0 || sock > MAX_FILEID)
+		return -1;
+
+
+	FCB* fcb = get_fcb(sock);
+
+	if(fcb == NULL)
+		return -1;
+
+	SCB* p_socket = fcb->streamobj;
+
+	// shut down can only be used on a peer socket
+	if (p_socket->type != SOCKET_PEER)
+		return -1;
+
+	switch (how) {
+
+		case SHUTDOWN_READ:
+			if( !pipe_reader_close(p_socket->s_peer.read) )
+				return -1;
+			p_socket->s_peer.read = NULL;
+			break;
+		case SHUTDOWN_WRITE:
+			if( !pipe_writer_close(p_socket->s_peer.write) )
+				return -1;
+			p_socket->s_peer.write = NULL;
+			break;
+		case SHUTDOWN_BOTH:
+			if( !(pipe_writer_close(p_socket->s_peer.write) || pipe_reader_close(p_socket->s_peer.read)) )
+				return -1;
+			p_socket->s_peer.read  = NULL;
+			p_socket->s_peer.write = NULL;
+			break;
+
+	}
+	
+
+
+	return 0;
 }
 
 
@@ -185,13 +324,60 @@ int sys_ShutDown(Fid_t sock, shutdown_mode how)
 // socket read/write/close
 
 int socket_read(void* read, char* buf, uint size){
-	return -1;
+
+	SCB* scb = (SCB*)read;
+
+	if (scb == NULL)
+		return -1;
+
+	if (scb->type != SOCKET_PEER || scb->s_peer.peer == NULL)
+		return -1;
+
+	int retval = pipe_read(scb->s_peer.read, buf, size);
+
+	return retval;
 }
 
 int socket_write(void* write, const char* buf, uint size){
-	return -1;
+
+	SCB* scb = (SCB*)write;
+
+	if(scb == NULL)
+		return -1;
+
+	if (scb->type != SOCKET_PEER || scb->s_peer.peer == NULL)
+		return -1;
+
+	int retval = pipe_write(scb->s_peer.write, buf, size);
+
+	return retval;
 }
 
 int socket_close(void* fid){
-	return -1;
+
+	SCB* p_socket = (SCB*)fid;
+
+	if (p_socket == NULL)
+		return -1;
+
+	if (p_socket->type == SOCKET_PEER) {
+		if ( !(pipe_writer_close(p_socket->s_peer.write) || pipe_reader_close(p_socket->s_peer.read)) )
+			return -1;
+		p_socket->s_peer.peer == NULL;
+	}
+
+	if (p_socket->type == SOCKET_LISTENER) {
+
+		PORTMAP[p_socket->port] = NULL;
+		kernel_broadcast(&p_socket->s_listener.req_available);
+
+	}
+
+
+	p_socket->refcount--;
+
+	if (!p_socket->refcount)
+		free(p_socket);
+
+	return 0;
 }
