@@ -4,4 +4,4 @@
 
 
 Changes currently made only to kernel_pipe.c and kernel_dev.h
-Update: half of socket tests are now OK
+Update: 19 of the 25 socket tests are now OK
