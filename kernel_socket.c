@@ -18,15 +18,13 @@ file_ops socket_file_ops = {
 
 Fid_t sys_Socket(port_t port)
 {		
-	if(port == NOPORT)
-		return 0;
 
 	// if input port is invalid, reurn NOFILE
 	if (port < 0 || port > MAX_PORT)
 		return NOFILE;
 
-	FCB* fcb;
-	Fid_t fid;
+	FCB* fcb = NULL;
+	Fid_t fid = -1;
 	int k = FCB_reserve(1,&fid,&fcb);
 	// if FCB_reserve returns 0 ,there is no FCB reservation.
 	if(k == 0)
@@ -80,7 +78,7 @@ int sys_Listen(Fid_t sock)
 	// port and socket inspection
 	if(PORTMAP[p_scb->port] != NULL)	// socket is already initialized
 		return -1;
-	if(p_scb->port < 0 || p_scb->port > MAX_PORT)	// socket must have a legal port number
+	if(p_scb->port <= 0 || p_scb->port > MAX_PORT)	// socket must have a legal port number
 		return -1;
 	if(p_scb->type != SOCKET_UNBOUND)	// socket already a listener
 		return -1;
@@ -153,6 +151,9 @@ Fid_t sys_Accept(Fid_t lsock)
 
 	//create a socket with port from peer 1
 	Fid_t desc = sys_Socket(peer1->port);
+	if (desc == NOFILE)
+		return NOFILE;
+
 	FCB* f = get_fcb(desc);
 
 	if(f == NULL)
@@ -163,6 +164,7 @@ Fid_t sys_Accept(Fid_t lsock)
 	if(peer2 == NULL)
 		return NOFILE;
 
+	peer1->type = SOCKET_PEER;
 	peer2->type = SOCKET_PEER;
 
 
@@ -202,6 +204,12 @@ Fid_t sys_Accept(Fid_t lsock)
 	pipe2->r_pos = 0;
 	// -----------------------
 
+	peer1->s_peer.write = pipe1;
+	peer1->s_peer.read  = pipe2;
+
+	peer2->s_peer.write = pipe2;
+	peer2->s_peer.read  = pipe1;
+
 	kernel_signal(&request->connected_cv);
 	p_scb->refcount--;
 
@@ -228,9 +236,9 @@ int sys_Connect(Fid_t sock, port_t port, timeout_t timeout)
 	//3. If socket to be connected is already a peer or a listener
 	if (f == NULL || p_socket == NULL || p_socket->type != SOCKET_UNBOUND) 
 		return -1;
-	if (port <= 0 || port > MAX_PORT)
+	if (port < 0 || port > MAX_PORT)
 		return -1;
-	if (PORTMAP[port] == NULL) // || PORTMAP[port]->type != SOCKET_LISTENER
+	if (PORTMAP[port] == NULL) 
 		return -1;
 
 	/* Establish the connection */
@@ -260,10 +268,10 @@ int sys_Connect(Fid_t sock, port_t port, timeout_t timeout)
 	}
 
 	p_socket->refcount--;
-	if(!p_socket->refcount)
+	if( p_socket->refcount == 0 )
 		free(p_socket);
 
-	if (!request->admitted)
+	if ( request->admitted == 0 )
 		return -1;
 
 	return 0;
@@ -295,17 +303,19 @@ int sys_ShutDown(Fid_t sock, shutdown_mode how)
 	switch (how) {
 
 		case SHUTDOWN_READ:
-			if( !pipe_reader_close(p_socket->s_peer.read) )
+			if( pipe_reader_close(p_socket->s_peer.read) != 0 )
 				return -1;
 			p_socket->s_peer.read = NULL;
 			break;
 		case SHUTDOWN_WRITE:
-			if( !pipe_writer_close(p_socket->s_peer.write) )
+			if( pipe_writer_close(p_socket->s_peer.write) != 0 )
 				return -1;
 			p_socket->s_peer.write = NULL;
 			break;
 		case SHUTDOWN_BOTH:
-			if( !(pipe_writer_close(p_socket->s_peer.write) || pipe_reader_close(p_socket->s_peer.read)) )
+			int r1 = pipe_writer_close(p_socket->s_peer.write);
+			int r2 = pipe_reader_close(p_socket->s_peer.read);
+			if( r1 == -1 || r2 == -1 )
 				return -1;
 			p_socket->s_peer.read  = NULL;
 			p_socket->s_peer.write = NULL;
@@ -363,7 +373,7 @@ int socket_close(void* fid){
 	if (p_socket->type == SOCKET_PEER) {
 		if ( !(pipe_writer_close(p_socket->s_peer.write) || pipe_reader_close(p_socket->s_peer.read)) )
 			return -1;
-		p_socket->s_peer.peer == NULL;
+		p_socket->s_peer.peer = NULL;
 	}
 
 	if (p_socket->type == SOCKET_LISTENER) {
