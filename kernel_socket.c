@@ -4,6 +4,7 @@
 #include "kernel_streams.h"
 #include "kernel_cc.h"
 #include "kernel_sched.h"
+#include "kernel_proc.h"
 
 // port map
 SCB* PORTMAP[MAX_PORT];
@@ -27,7 +28,7 @@ Fid_t sys_Socket(port_t port)
 	Fid_t fid = -1;
 	int k = FCB_reserve(1,&fid,&fcb);
 	// if FCB_reserve returns 0 ,there is no FCB reservation.
-	if(k == 0)
+	if(!k)
 		return NOFILE;
 
 	// if this is the first time we call sys_Socket , initialize the port map
@@ -100,6 +101,19 @@ Fid_t sys_Accept(Fid_t lsock)
 	// invalid file ID
 	if (lsock > MAX_FILEID || lsock < 0)
 		return NOFILE;
+
+	// check if process has available fids 
+	PCB* pcb = get_pcb(lsock);
+	if (pcb == NULL)
+		return NOFILE;
+	uint c = 0;
+	for (uint j = 0; j < MAX_FILEID; j++) {
+		if(pcb->FIDT[j] != NULL)
+			c++;
+	}
+	if (c == MAX_FILEID)
+		return NOFILE;
+	// ===================================
 
 
 	FCB* fcb = get_fcb(lsock);
