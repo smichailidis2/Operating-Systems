@@ -357,6 +357,10 @@ int socket_read(void* read, char* buf, uint size){
 	if (scb->type != SOCKET_PEER || scb->s_peer.peer == NULL)
 		return -1;
 
+	//probably not necessary
+	if (scb->s_peer.read == NULL)
+		return -1;
+
 	int retval = pipe_read(scb->s_peer.read, buf, size);
 
 	return retval;
@@ -372,11 +376,17 @@ int socket_write(void* write, const char* buf, uint size){
 	if (scb->type != SOCKET_PEER || scb->s_peer.peer == NULL)
 		return -1;
 
+	// PROBABLY NOT NESSECARY
+	if (scb->s_peer.write == NULL)
+		return -1;
+
 	int retval = pipe_write(scb->s_peer.write, buf, size);
 
 	return retval;
 }
 
+
+//--------------------------------------------------------------------------------------------------
 int socket_close(void* fid){
 
 	SCB* p_socket = (SCB*)fid;
@@ -405,3 +415,75 @@ int socket_close(void* fid){
 
 	return 0;
 }
+//-------------------------------------------------------------*/
+
+/*//------------------------------------------------------------
+int socket_close(Fid_t fid){
+
+	FCB* fcb = get_fcb(fid);
+
+	if(fcb == NULL)
+		return -1;
+
+	SCB* p_socket = fcb->streamobj;
+
+	//void* fid
+	//SCB* p_socket = (SCB*)fid;
+
+	if (p_socket == NULL)
+		return -1;
+
+	if (p_socket->type == SOCKET_PEER) {
+		if ( !(pipe_writer_close(p_socket->s_peer.write) || pipe_reader_close(p_socket->s_peer.read)) )
+			return -1;
+		p_socket->s_peer.peer = NULL;
+	}
+
+	if (p_socket->type == SOCKET_LISTENER) {
+
+		PORTMAP[p_socket->port] = NULL;
+		kernel_broadcast(&p_socket->s_listener.req_available);
+
+	}
+
+
+	p_socket->refcount--;
+
+	if (!p_socket->refcount)
+		free(p_socket);
+
+	return 0;
+}
+//-----------------------------------------------------------------------*/
+/*
+int socket_close(void* fid){
+
+	FCB* fcb = get_fcb(fid);
+
+	SCB* p_socket = fcb->streamobj;
+
+	if (p_socket == NULL)
+		return -1;
+
+	if (p_socket->type == SOCKET_PEER) {
+		if ( !(pipe_writer_close(p_socket->s_peer.write) || pipe_reader_close(p_socket->s_peer.read)) )
+			return -1;
+		p_socket->s_peer.peer = NULL;
+	}
+
+	if (p_socket->type == SOCKET_LISTENER) {
+
+		PORTMAP[p_socket->port] = NULL;
+		kernel_broadcast(&p_socket->s_listener.req_available);
+
+	}
+
+
+	p_socket->refcount--;
+
+	if (!p_socket->refcount)
+		free(p_socket);
+
+	return 0;
+}
+*/

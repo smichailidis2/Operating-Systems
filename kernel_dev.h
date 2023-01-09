@@ -199,6 +199,7 @@ typedef enum socket_type{
   
 int socket_read(void* read, char* buf, uint size);
 int socket_write(void* write, const char* buf, uint size);
+//int socket_close(Fid_t fid);
 int socket_close(void* fid);
 
 
