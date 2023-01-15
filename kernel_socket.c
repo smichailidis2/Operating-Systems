@@ -1,4 +1,3 @@
-
 #include "tinyos.h"
 #include "kernel_dev.h"
 #include "kernel_streams.h"
@@ -310,9 +309,14 @@ int sys_ShutDown(Fid_t sock, shutdown_mode how)
 
 	SCB* p_socket = fcb->streamobj;
 
+	if (p_socket == NULL)
+		return -1;
+
 	// shut down can only be used on a peer socket
 	if (p_socket->type != SOCKET_PEER)
 		return -1;
+
+
 
 	switch (how) {
 
@@ -410,8 +414,8 @@ int socket_close(void* fid){
 
 	p_socket->refcount--;
 
-	if (!p_socket->refcount)
-		free(p_socket);
+	//if (!p_socket->refcount)
+		//free(p_socket);
 
 	return 0;
 }
@@ -419,71 +423,47 @@ int socket_close(void* fid){
 
 /*//------------------------------------------------------------
 int socket_close(Fid_t fid){
-
 	FCB* fcb = get_fcb(fid);
-
 	if(fcb == NULL)
 		return -1;
-
 	SCB* p_socket = fcb->streamobj;
-
 	//void* fid
 	//SCB* p_socket = (SCB*)fid;
-
 	if (p_socket == NULL)
 		return -1;
-
 	if (p_socket->type == SOCKET_PEER) {
 		if ( !(pipe_writer_close(p_socket->s_peer.write) || pipe_reader_close(p_socket->s_peer.read)) )
 			return -1;
 		p_socket->s_peer.peer = NULL;
 	}
-
 	if (p_socket->type == SOCKET_LISTENER) {
-
 		PORTMAP[p_socket->port] = NULL;
 		kernel_broadcast(&p_socket->s_listener.req_available);
-
 	}
-
-
 	p_socket->refcount--;
-
 	if (!p_socket->refcount)
 		free(p_socket);
-
 	return 0;
 }
 //-----------------------------------------------------------------------*/
 /*
 int socket_close(void* fid){
-
 	FCB* fcb = get_fcb(fid);
-
 	SCB* p_socket = fcb->streamobj;
-
 	if (p_socket == NULL)
 		return -1;
-
 	if (p_socket->type == SOCKET_PEER) {
 		if ( !(pipe_writer_close(p_socket->s_peer.write) || pipe_reader_close(p_socket->s_peer.read)) )
 			return -1;
 		p_socket->s_peer.peer = NULL;
 	}
-
 	if (p_socket->type == SOCKET_LISTENER) {
-
 		PORTMAP[p_socket->port] = NULL;
 		kernel_broadcast(&p_socket->s_listener.req_available);
-
 	}
-
-
 	p_socket->refcount--;
-
 	if (!p_socket->refcount)
 		free(p_socket);
-
 	return 0;
 }
 */
