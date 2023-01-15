@@ -75,7 +75,7 @@ int pipe_write(void* pipecb_t, const char *buf, unsigned int n)
 	
 
 	/*------- ENTER IN CRITICAL SECTION -------*/
-	while(available_bytes == 0 ) {
+	while(available_bytes == 0 && p_pipe->reader != NULL) {
 		// while there is no room to write , we must signal the reader , and then wait for it to read some data.
 		kernel_wait(&p_pipe->has_space, SCHED_PIPE);
 
@@ -86,7 +86,7 @@ int pipe_write(void* pipecb_t, const char *buf, unsigned int n)
 
 
 	//if the available bytes are less than the length of buffer to be copied, only the available bytes will be filled.
-	uint k = (n > available_bytes )? available_bytes : n ;
+	uint k = (n > available_bytes ) ? available_bytes : n ;
 
 	/*=== PERFORM WRITE OPERATION ===*/
 	for (int i=0; i < k; i++) {
@@ -116,12 +116,13 @@ int pipe_read(void* pipecb_t, char *buf, unsigned int n)
 
 	uint available_bytes = p_pipe->available_buffer_space;
 
-	// tif there is no writer and pipe buffer is empty, bytes read = 0.
+	// if there is no writer and pipe buffer is empty, bytes read = 0.
 	if (p_pipe->writer == NULL && available_bytes == PIPE_BUFFER_SIZE)
 		return 0;
 
+
 	/*------- ENTER IN CRITICAL SECTION -------*/
-	while(available_bytes == PIPE_BUFFER_SIZE ) {
+	while( available_bytes == PIPE_BUFFER_SIZE ) {
 		// while there are no data written , we must wait until writer writes some data.
 		kernel_wait(&p_pipe->has_data, SCHED_PIPE);
 

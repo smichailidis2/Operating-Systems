@@ -391,9 +391,9 @@ int socket_write(void* write, const char* buf, uint size){
 
 
 //--------------------------------------------------------------------------------------------------
-int socket_close(void* fid){
+int socket_close(void* scb){
 
-	SCB* p_socket = (SCB*)fid;
+	SCB* p_socket = (SCB*)scb;
 
 	if (p_socket == NULL)
 		return -1;
